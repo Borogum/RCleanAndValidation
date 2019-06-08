@@ -11,8 +11,8 @@ La actividad ha sido realizada de forma individual por **Darío M. García Carre
 ## Archivos
 
 * Archivo original: _"data/abalone.csv"_.
-* Archivo procesado: _"data/abalone_cleaned.csv"__
-* Documentación y código fuente: _"doc/pra2.html"_.
+* Archivo procesado: _"data/abalone_cleaned.csv"_
+* Documentación y código fuente: _"doc/PRA-2.html"_
 
 ## Recursos
 
