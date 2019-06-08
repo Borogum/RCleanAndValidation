@@ -1,0 +1,503 @@
+---
+title: "PRA-2"
+author: "Dario M. García Carretero"
+date: '`r format(Sys.Date(),"%e/%m/%Y")`'
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: true 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(knitr)
+library(caret)
+library(dplyr)
+library(corrplot)
+library(car)
+library(ggpubr)
+library(VIM)
+```
+
+# 1 Descripción del dataset
+
+Los haliótidos (Haliotidae) son una familia de moluscos gasterópodos con un único género, Haliotis, muy estimado por su carne. Son conocidos como orejas de mar y abulones, o con el término inglés de abalone, aunque también se les conoce con otros nombres dependiendo del país. Su carne es un plato muy apreciado en Asia Oriental (China, Japón , Taiwán y Corea), y se ha adoptado con fervor en algunas zonas de Estados Unidos y recientemente en México, lo que ha llevado a problemas de conservación.
+
+Debido a su interés comercial, se han realizado múltiples estudios sobre esta familia de moluscos. Una de las características analizada en los estudios es la edad de los individuos. La edad de los abulones se determina cortando la cáscara a través del cono, manchándolo, y contando el número de anillos a través de un microscopio. Esta es una tarea aburrida y que consume mucho tiempo. 
+
+El objetivo de este estudio es determinar si es posible estimar la edad de los abulones utilizando medidas que sean fáciles de obtener como pesos y/o dimensiones.
+
+El conjunto de datos objeto del análisis ha sido descargado de _UC Irvine Machine Learning Repository_ a través del siguiente enlace: https://archive.ics.uci.edu/ml/datasets/Abalone. El dataset está formado por un total de 4177 registros. Cada registro se corresponde con un individuo y contiene los siguientes atributos:
+
+* Sex: Sexo, los valores pueden ser:  M (Macho), F (Hembra) o I (Alevín).
+* Length: Longitud. 
+* Diameter: Diámetro.
+* Height: Altura.
+* Whole weight: Peso total.
+* Shucked weight: Peso de la carne.
+* Viscera weight: Peso de las vísceras.
+* Shell weight: Peso de la concha.
+* Rings: Número de anillos.
+
+**Notas**
+
+- En el conjunto original las longitudes estaban medidas en milímetros y los pesos en gramos, pero en el dataset descargado los valores han sido divididos por 200.
+
+- Según estudios paralelos la edad del individuo puede obtenerse sumando 1.5 al número de anillos.
+
+
+# 2 Integración y selección de los datos de interés
+
+Los datos se presentan en un único archivo csv por lo que no será necesario la integración de varias fuentes de información. Empezaremos cargando los datos del archivo csv:
+
+```{r}
+
+# Columns names
+column_names <- c("sex", "length", "diameter", "height", "whole_weight", "shucked_weight", "viscera_weight", "shell_weight", "rings")
+
+# Load data
+data <- read.table(file="../data/abalone.csv", sep=",", header=FALSE)
+
+# Add columns names
+names(data) <- column_names
+
+# Show result
+kable(head(data))
+
+```
+
+Como nos interesa la edad de los abulones y no el número de anillos crearemos un nuevo campo llamado "age", este campo se calculará añadiendo 1.5 al número de anillos (ver notas del apartado anterior). Como en número de anillos ya no será necesario eliminaremos el campo "rings".
+
+
+```{r}
+
+# Create "age" field
+data["age"] <- data["rings"] + 1.5
+
+# Remove "rings" field
+data <- select(data, -c("rings"))
+
+# Reoder labels (representation purpose)
+data$sex <- relevel(data$sex, "I")
+
+# Show result
+kable(head(data))
+
+```
+
+Comprobemos que los tipos de datos se han interpretado de forma correcta:
+
+```{r}
+
+res <- sapply(data, class)
+kable(data.frame(Name=names(res), Class=as.vector(res)))
+
+```
+
+Como se puede ver los tipos de datos se han interpretado correctamente.
+
+# 3 Limpieza de datos
+
+
+## 3.1 Ceros y/o elementos vacios
+
+Primero mostraremos un pequeño resumen de los datos. En él figuran varias estadísticas descriptivas de cada uno de los atributos:
+
+```{r}
+
+summary(data)
+
+```
+
+Como se puede ver no hay ningún atributo que tenga valores vacíos. Sin embargo podemos ver que el campo "height" presenta al menos un 0. No tiene mucho sentido que ocurra esto y probablemente se deba a algún fallo en la medida. Veamos primero cuantos registros están afectados:
+
+```{r}
+
+kable(data[data$height == 0, ])
+
+```
+
+Solo dos registros están afectados por lo que eliminar estos registros sería una buena opción. Sin embargo, en este caso imputaremos estos valores utilizando la función _kNN_ del paquete _VIM_:
+
+
+```{r}
+
+# Impute data with median and k=5
+imputed_data <- kNN(data, variable = c("height"), makeNA = 0.0, imp_var=FALSE)
+
+```
+
+Comprobemos que los datos se han imputado correctamente:
+
+```{r}
+
+kable(imputed_data %>% slice(c(1258, 3997)))
+
+```
+
+
+## 3.2 Valores extremos
+
+Para tratar de localizar posibles valores extremos vamos a representar cada una de las variables usando diagramas de cajas:
+
+```{r}
+
+# Only numerical attributes names
+numerical_attributes <- names(imputed_data)[2:length(names(imputed_data))]
+
+# Create grid
+par(mfrow=c(2,4))
+
+# Plot
+for (v in numerical_attributes){
+  boxplot(imputed_data[[v]], main=v)
+}
+
+```
+
+Observando las gráficas se pueden observar lo que podrían ser al menos dos valores extremos en el atributo "height". Veamos a continuación cuantos registros están afectados por estos valores extremos:
+
+```{r}
+
+# Exteme values are greather than 0.4
+kable(imputed_data[imputed_data$height > 0.4, ])
+
+```
+
+Vemos que únicamente son dos valores. En este caso, a falta de más información, considero que la mejor opción sería eliminar estos registros ya que no representan un número elevado de registros en comparación al número total. Procedemos a continuación a eliminar dichos registros:
+
+
+```{r}
+
+# Removing extreme values
+cleaned_data <- imputed_data[imputed_data$height < 0.4, ]
+
+# Create grid
+par(mfrow=c(1,2))
+
+# Plot
+boxplot(imputed_data["height"], main= "Antes")
+boxplot(cleaned_data["height"], main= "Después")
+
+```
+
+
+## 3.3 Exportación de los datos preprocesados
+
+Una vez que hemos completado todas las tareas de limpieza podemos almacenar el dataset generado para usos posteriores:
+
+```{r}
+
+write.csv(cleaned_data, "../data/abalone_cleaned.csv", row.names=FALSE)
+
+```
+
+
+# 4 Análisis de los datos
+
+
+## 4.1 Selección de los grupos de datos
+
+En muchas especies animales las características físicas de los especímenes varían en función del sexo al que pertenezcan. Dado que para estimar la edad de los abulones se van a utilizar medidas físicas será interesante comprobar si existen diferencias significativas entre los diferentes sexos. Para poder sacar conclusiones extrapolables es deseable que todas las clases estén igualmente representadas:
+
+
+```{r}
+
+barplot(table(cleaned_data$sex))
+
+```
+
+
+Se puede ver que las clases tienen más o menos el mismo número de individuos. Para mostrar la distribución de los atributos en función del sexo se muestra a continuación un diagrama de cajas para cada una de las variables:
+
+```{r}
+
+# Create grid
+par(mfrow=c(2,4))
+
+# Plot
+for (v in names(cleaned_data)[2:length(names(cleaned_data))]){
+  boxplot(as.formula(paste(v, "~ sex")), data=cleaned_data, main=v, xlab="Sex")
+}
+```
+
+Observando las gráficas se pueden ver pequeñas diferencias entre sexo femenino (F) y el masculino (M). Las diferencias respecto a los alevines (I) son más evidentes. Esto es lógico ya que estos, al no estar totalmente desarrollados, tendrán pesos y tamaños menores que los individuos adultos. Para estudiar con más detalle las posibles diferencias crearemos tres grupos de datos, uno para cada sexo y otro para los alevines:
+
+
+```{r}
+
+cleaned_data.sex_F <- cleaned_data[cleaned_data$sex == "F",][numerical_attributes]
+cleaned_data.sex_M <- cleaned_data[cleaned_data$sex == "M",][numerical_attributes]
+cleaned_data.sex_I <- cleaned_data[cleaned_data$sex == "I",][numerical_attributes]
+
+```
+
+
+##  4.2 Comprobación de normalidad y homogeneidad de la varianza
+
+
+Una de las finalidades del estudio de la normalidad y de la homogeneidad de varianzas es la selección del test a aplicar en el contraste sobre las medias de las muestras. Por simplicidad y debido a la clara diferencia entre los valores tomados para adultos y alevines solo se realizarán las comprobaciones sobre las hembras y los machos.
+
+
+### 4.2.1 Comprobación de la normalidad
+
+En las siguientes secciones comprobaremos si se cumplen las condiciones de normalidad sobre las distintas variables numéricas de cada uno de los sexos.
+
+
+#### 4.2.1.1 Normalidad en las hembras
+
+Para hacernos una idea de cómo están distribuidas cada una de las variables mostraremos a continuación un histograma de cada una de ellas:
+
+```{r}
+
+# Create grid
+par(mfrow=c(2,4))
+
+# Plot
+for (v in numerical_attributes){
+  hist(cleaned_data.sex_F[[v]] , main=v, xlab="")
+}
+```
+
+Podemos observar que en la mayoría de los histogramas existe un desplazamiento con respecto a la media (skewness). Este comportamiento es un indicador de ausencia de normalidad. Para corroborar esta apreciación utilizaremos el test de normalidad de Shapiro–Wilk en combinación con una Q-Q plot sobre cada uno de los atributos:
+
+```{r}
+
+# Create grid
+par(mfrow=c(2,4), mar=c(4,2,2,2), pin=c(1.2, 1.2))
+
+# Plot
+for (v in numerical_attributes){
+  sw <- shapiro.test(cleaned_data.sex_F[[v]])
+  xlab <- paste("Test p-value: ", formatC(sw$p.value, format="e", digits = 2))
+  qqnorm(cleaned_data.sex_F[[v]], main=v, xlab=xlab, ylab="")
+  qqline(cleaned_data.sex_F[[v]], col = 2)
+}
+```
+
+Los resultados confirman la usencia de normalidad en en todos los casos (nivel de significación 0.05).
+
+
+#### 4.2.1.2 Normalidad en los machos
+
+Seguiremos los mismos pasos descritos con anterioridad pero aplicados a los datos referentes a los machos. Primero mostraremos los histogramas:
+
+```{r}
+
+# Create grid
+par(mfrow=c(2,4))
+
+# Plot
+for (v in numerical_attributes){
+  hist(cleaned_data.sex_M[[v]] , main=v, xlab="")
+}
+```
+
+Se puede observar un comportamiento similar al caso de las hembras. Aplicaremos el test de Shapiro–Wilk para comprobar que sucede lo mismo con la normalidad:
+
+```{r}
+
+# Create grid
+par(mfrow=c(2,4), mar=c(4,2,2,2), pin=c(1.2, 1.2))
+
+# Plot
+for (v in numerical_attributes){
+  sw <- shapiro.test(cleaned_data.sex_M[[v]])
+  xlab <- paste("p-value: ", formatC(sw$p.value, format="e", digits = 2))
+  qqnorm(cleaned_data.sex_M[[v]], main=v, xlab=xlab, ylab="")
+  qqline(cleaned_data.sex_M[[v]], col = 2)
+}
+```
+
+Como sucedía con las hembras debemos rechazar que cualquiera de las distribuciones provenga de una normal.
+
+
+### 4.2.3 Comprobación de la homegeniedad de varianzas
+
+A continuación comprobaremos la hipótesis sobre la homogeneidad de las varianzas para cada uno de los atributos numéricos. Para ello y dado que no podemos suponer la normalidad utilizaremos el test de Fligner-Killeen. A continuación se muestran los resultados obtenidos:
+
+
+```{r}
+
+for (v in numerical_attributes){
+  sw <- fligner.test(x = list(cleaned_data.sex_F[[v]], cleaned_data.sex_M[[v]]))
+  cat("-", v, "- p-value: ", sw$p.value, "\n")
+}
+```
+
+Los resultados indican que podemos considerar igualdad de varianzas (nivel de significación 0.05) para los atributos "viscera_weight", "shell_weight" y "age".
+
+
+## 4.3 Aplicación de pruebas estadísticas
+
+### 4.3.1 Comprobacion de la igualdad entre medias
+
+Queremos comprobar si existen diferencias significativas entre las medias de los atributos de los dos conjuntos (machos y hembras). Debemos recodar que no podemos garantizar la normalidad ni tampoco la igualdad de varianzas en todos los casos. Sin embargo, al disponer de muestras de un tamaño mayor de 30 podemos suponer la normalidad en las muestras por lo que aplicaremos el test de Welch para muestras con varianzas diferentes:
+
+```{r}
+
+for (v in numerical_attributes){
+  sw <- t.test(cleaned_data.sex_F[[v]], cleaned_data.sex_M[[v]], var.equal=FALSE, alternative="two.sided")
+  cat("-", v, "- p-value: ", sw$p.value, "\n")
+}
+```
+
+En la mayoría de los atributos se observan diferencias significativas en las medias salvo en "shucked_weight" por lo tanto podemos considerar que existen diferencias, en general, entre las características físicas de ambos sexos.
+
+
+### 4.3.2 Análisis de la importancia de las variables
+
+En los siguientes apartados estudiaremos la importancia de las distintas variables para la predicción de la edad de los abulones. Hemos visto anteriormente que existen diferencias significativas entre las características físicas de los distintos sexos (machos, hembras y alevines) y por ese motivo se estudiarán de forma separada los tres conjuntos definidos anteriormente. Adicionalmente, y para que sirva como referencia, se presentarán también los resultados del conjunto completo de datos.
+
+
+#### 4.3.1 Análisis de correlación
+
+En esta sección analizaremos la correlación entre las diferentes variables entre los distintos grupos definidos en apartados anteriores. Empezaremos realizando el análisis sobre el conjunto completo de datos:
+
+
+```{r}
+
+corrplot(cor(cleaned_data[numerical_attributes]), method = "color", col = gray.colors(100),
+         type = "upper", order = "alphabet", number.cex = .7,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, # Text label color and rotation
+         # Combine with significance
+         sig.level = 0.01, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+
+```
+
+
+De los resultados podemos destacar dos cosas:
+
+- Todas las variables, excluyendo la edad, tienen una correlación bastante alta entre ellas.
+- Con respecto a la edad, la correlación es relativamente baja (entre 0.42 y 0.63).
+
+
+Veamos ahora los resultados para el grupo de hembras:
+
+```{r}
+
+corrplot(cor(cleaned_data.sex_F[numerical_attributes]), method = "color", col = gray.colors(100),
+         type = "upper", order = "alphabet", number.cex = .7,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, # Text label color and rotation
+         # Combine with significance
+         sig.level = 0.01, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+
+```
+
+Vemos que la correlación entre variables baja levemente en general, pero se produce un acusado descenso en los valores de la correlación entre la edad ("age") y el resto de variables. 
+
+Veamos que ocurre en el caso de los machos:
+
+```{r}
+
+corrplot(cor(cleaned_data.sex_M[numerical_attributes]), method = "color", col = gray.colors(100),
+         type = "upper", order = "alphabet", number.cex = .7,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, # Text label color and rotation
+         # Combine with significance
+         sig.level = 0.01, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+
+```
+
+
+Se vuelve a observar un comportamiento similar al caso anterior aunque en este caso las correlaciones no han disminuido tanto.
+
+Finalmente comprovemos que ocurre con los alevines:
+
+```{r}
+
+corrplot(cor(cleaned_data.sex_I[numerical_attributes]), method = "color", col = gray.colors(100),
+         type = "upper", order = "alphabet", number.cex = .7,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, # Text label color and rotation
+         # Combine with significance
+         sig.level = 0.01, insig = "blank",
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+
+```
+
+Vemos que las correlaciones son las más altas de todos los conjuntos estudiados.
+
+
+Después del análisis de los cuatro conjuntos podemos llegar a la conclusión de que las medidas tomadas son más relevantes cuando el individuo está en periodo de crecimiento. Esto tiene mucho sentido, de hecho con los humanos ocurre los mismo, cuando queremos hacernos una idea de que edad tiene un niño nos fijamos en su tamaño, sin embargo en el caso de los adultos nos fijamos en otros aspectos como las arrugas por ejemplo.
+
+
+#### 4.3.2 Análisis de regresión
+
+Estudiaremos ahora la importancia de las variables desde el punto de vista de la regresión lineal. 
+
+Empezaremos generando el modelo para el conjunto con todos los datos:
+
+```{r}
+
+model <- lm(age ~ length + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data=cleaned_data)
+summary(model)
+
+```
+
+Si observamos los resultados podemos ver que todos los atributos se consideran relevantes, exceptuando el atributo "length" (nivel de significación 0.05). El coeficiente de determinación (r2) tiene un valor de 0.53, un valor bastante bajo.
+
+Veamos ahora los resultados para el conjunto de hembras:
+
+```{r}
+model <- lm(age ~ length + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data=cleaned_data.sex_F)
+summary(model)
+```
+
+
+En este caso se consideran irrelevantes los atributos "length" y "diameter". En cuanto al coeficiente de determinación se obtiene un 0.4413 no tan bajo como en el caso de las hembras pero aun así es un resultado bastante malo.
+
+Finalmente veamos cómo se comporta el conjunto de los alevines:
+
+
+```{r}
+model <- lm(age ~ length + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data=cleaned_data.sex_M)
+summary(model)
+```
+
+Pare este caso se consideran irrelevantes los atributos "length" y "diameter". En cuanto al coeficiente de determinación se obtiene un 0.4413 no tan bajo como en el caso de las hembras pero aun asi es un resultados bastante malo.
+
+Finalemnte veamos como se comporta el conjunto de los alevines:
+
+```{r}
+model <- lm(age ~ length + diameter + height + whole_weight + shucked_weight + viscera_weight + shell_weight, data=cleaned_data.sex_I)
+summary(model)
+```
+
+Nuevamente vemos que el modelo considera irrelevantes los atributos "length" y "diameter". El coeficiente de determinación es el más alto de los cuatro conjuntos estudiados, 0.5885.
+
+Como era de esperar teniendo en cuenta los resultados del análisis de la correlación el mejor  de todos los modelos es el del cojunto de los alevines. Es interesante destacar que los atributos: "length", "shucked_weight" y "viscera_weight"  contribuyen negativamente al cáculo de la edad (coeficientes negativos) mientras que el resto contribuyen de manera positiva (coeficientes positivos) y esto se cumple para los cuatro conjuntos de datos.
+
+# 5 Conclusiones finales
+
+De todos los estudios anterioes se puede sacar las siguientes conclusiones:
+
+* El metodo funciona bastante bien para los alevines
+
+* Todas las variables guarda una relacione entre ellas
+
+* Seguramente sean necesario añadir mas variables 
+
+* Segun la regrsio las variables que influen positivamente son -.... y las que  lo cual es basntane raro
+
+
+
+
+
+
+
