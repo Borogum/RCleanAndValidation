@@ -493,6 +493,6 @@ De los estudios anteriores se puede sacar las siguientes conclusiones:
 
 * La estimación de la edad de los alevines será más precisa que en el resto de sexos.
 
-* Todas las variables están demasiado relacionadas entre ellas, quizás sería conveniente o bien, añadir más variables que no se están teniendo en cuenta o crear nuevos atributos a través de "feature engineering".
+* Todas las variables están demasiado relacionadas entre ellas, quizás sería conveniente o bien, añadir más variables que no se están teniendo en cuenta (alimentación, condiciones ambientales, etc.) o crear nuevos atributos a través de "feature engineering".
 
 * Según el modelo de regresión, a mayor diámetro, altura, peso y peso de la concha mayor edad tendrá el espécimen.
