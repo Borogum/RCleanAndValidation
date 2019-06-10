@@ -496,3 +496,6 @@ De los estudios anteriores se puede sacar las siguientes conclusiones:
 * Todas las variables están demasiado relacionadas entre ellas, quizás sería conveniente o bien, añadir más variables que no se están teniendo en cuenta (alimentación, condiciones ambientales, etc.) o crear nuevos atributos a través de "feature engineering".
 
 * Según el modelo de regresión, a mayor diámetro, altura, peso y peso de la concha mayor edad tendrá el espécimen.
+
+
+En resumen, consideramos que el problema es difícil de resolver utilizando únicamente las técnicas aquí descritas. Sin embargo, gracias al uso de técnicas de minería de datos más sofisticadas seguramente fuera posible obtener resultados más satisfactorios.
